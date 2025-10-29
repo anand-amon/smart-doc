@@ -1,7 +1,8 @@
 import streamlit as st
 import requests
+import os
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 
 st.set_page_config(page_title="SmartDoc – Document Analyzer", page_icon="📄")
 st.title("📄 SmartDoc – Document Analyzer")
