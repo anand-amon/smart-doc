@@ -64,8 +64,10 @@ from typing import List
 # ----------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
-processor = DocumentProcessor()
-cv_processor = CVProcessor()
+
+def get_processor():
+    """Create processor only when needed (lazy initialization for GCP)"""
+    return DocumentProcessor()
 
 # Dev convenience: create tables once (use Alembic later in prod)
 db_models.Base.metadata.create_all(bind=engine)
@@ -107,7 +109,11 @@ async def upload_document(file: UploadFile = File(...)):
 
 
 @app.post("/process", response_model=schemas.ProcessResponse)
-async def process_document(file: UploadFile = File(...), db=Depends(get_db)):
+async def process_document(
+    file: UploadFile = File(...), 
+    db=Depends(get_db),
+    processor: DocumentProcessor = Depends(get_processor)
+):
     """
     Full pipeline:
       1) Save upload to disk
