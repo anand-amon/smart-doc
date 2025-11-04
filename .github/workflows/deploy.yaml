@@ -3,7 +3,7 @@ name: Deploy Backend and Frontend to Cloud Run
 on:
   push:
     branches:
-      - main  # Trigger deployment when code is pushed to main
+      - main  # Trigger deployment on every push to main
 
 jobs:
   backend:
@@ -14,18 +14,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Google Cloud SDK
+      # 🧩 Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # 🧩 Set up gcloud CLI
+      - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: smart-doc-476211
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
 
+      # 🧩 Configure Docker to use gcloud credentials
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker gcr.io -q
+
+      # 🧩 Build and Push Backend Image
       - name: Build and Push Backend Image
         run: |
           docker build -t gcr.io/smart-doc-476211/backend:${{ github.sha }} -f Dockerfile.backend .
           docker push gcr.io/smart-doc-476211/backend:${{ github.sha }}
 
+      # 🧩 Deploy Backend to Cloud Run
       - name: Deploy Backend to Cloud Run
         run: |
           gcloud run deploy backend \
@@ -40,24 +51,35 @@ jobs:
   frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
-    needs: backend  # Wait until backend deploy finishes successfully
+    needs: backend  # Run after backend deployment completes
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Google Cloud SDK
+      # 🧩 Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # 🧩 Set up gcloud CLI
+      - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: smart-doc-476211
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
 
+      # 🧩 Configure Docker for GCP
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker gcr.io -q
+
+      # 🧩 Build and Push Frontend Image
       - name: Build and Push Frontend Image
         run: |
           docker build -t gcr.io/smart-doc-476211/frontend:${{ github.sha }} -f Dockerfile.frontend .
           docker push gcr.io/smart-doc-476211/frontend:${{ github.sha }}
 
+      # 🧩 Deploy Frontend to Cloud Run
       - name: Deploy Frontend to Cloud Run
         run: |
           gcloud run deploy frontend \
