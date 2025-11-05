@@ -45,7 +45,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --service-account cloudrun-backend@smart-doc-476211.iam.gserviceaccount.com \
-            --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,KIMI_API_KEY=KIMI_API_KEY:latest"\
+            --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,KIMI_API_KEY=KIMI_API_KEY:latest,POSTGRES_URL=POSTGRES_URL:latest" \
             --set-env-vars "USE_KIMI_API=true,UPLOAD_DIR=/tmp/uploads,PROCESSED_DIR=/tmp/processed"
 
   frontend:
