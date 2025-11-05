@@ -77,3 +77,5 @@ class LLMProcessor:
             # 🔍 Log the full exception details
             logger.error(f"LLM extraction failed: {e}", exc_info=True)
             return {"error": str(e)}
+        
+        #
