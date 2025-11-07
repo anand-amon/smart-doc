@@ -4,6 +4,6 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://placeholder:9090
+    url: https://prometheus-968322240145.asia-east1.run.app
     isDefault: true
     editable: true
