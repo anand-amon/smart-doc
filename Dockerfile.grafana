@@ -1,0 +1,7 @@
+FROM grafana/grafana:10.2.0
+
+# Pre-configure Prometheus datasource
+COPY grafana-datasource.yml /etc/grafana/provisioning/datasources/
+COPY grafana-dashboard.yml /etc/grafana/provisioning/dashboards/
+
+EXPOSE 3000

@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'smartdoc-backend'
+    static_configs:
+      - targets: ['backend-968322240145.asia-east1.run.app']  # Your backend URL
+    scheme: https
+    metrics_path: '/metrics'

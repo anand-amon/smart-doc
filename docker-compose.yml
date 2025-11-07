@@ -8,6 +8,8 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    volumes:
+      - ./backend:/app/backend  # Local backend/ → Container /app/backend
     restart: unless-stopped
 
   frontend:
@@ -21,6 +23,8 @@ services:
       - BACKEND_URL=http://backend:8000
     env_file:
       - .env
+    volumes:
+      - ./frontend:/app/frontend  # Local frontend/ → Container /app/frontend
     depends_on:
       - backend
     restart: unless-stopped

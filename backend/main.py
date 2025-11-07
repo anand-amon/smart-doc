@@ -1,8 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-import shutil, os, logging
+import shutil, os, logging, time
 from logging.handlers import RotatingFileHandler
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter, Histogram, Gauge
 
 # Always resolve to the project root: backend/main.py → parents[1] == project root
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -41,7 +43,53 @@ from config import settings
 app = FastAPI(title="SmartDoc API")
 api_log = logging.getLogger("smartdoc")
 
-# CORS (same as you had)
+# ===== PROMETHEUS METRICS SETUP =====
+
+# Initialize Instrumentator (provides default HTTP metrics)
+instrumentator = Instrumentator(
+    should_group_status_codes=False,
+    should_ignore_untemplated=True,
+    should_respect_env_var=True,
+    should_instrument_requests_inprogress=True,
+    excluded_handlers=[".*admin.*", "/metrics"],
+    env_var_name="ENABLE_METRICS",
+    inprogress_name="fastapi_inprogress",
+    inprogress_labels=True,
+)
+
+# Custom business metrics
+documents_processed = Counter(
+    'smartdoc_documents_processed_total',
+    'Total number of documents processed',
+    ['status']  # success or failed
+)
+
+ocr_confidence = Histogram(
+    'smartdoc_ocr_confidence',
+    'OCR confidence scores',
+    buckets=[0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1.0]
+)
+
+llm_call_duration = Histogram(
+    'smartdoc_llm_call_duration_seconds',
+    'Time spent calling LLM API',
+    buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+)
+
+processing_duration = Histogram(
+    'smartdoc_document_processing_duration_seconds',
+    'Total document processing time',
+    buckets=[1.0, 5.0, 10.0, 30.0, 60.0, 120.0]
+)
+
+active_processing = Gauge(
+    'smartdoc_active_processing',
+    'Number of documents currently being processed'
+)
+
+# ===== END PROMETHEUS SETUP =====
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,7 +105,6 @@ from backend.db import crud, schemas
 
 # Processing pipeline
 from backend.pipeline.document_processor import DocumentProcessor
-from backend.pipeline.cv_processor import CVProcessor
 from fastapi import Query
 from typing import List
 
@@ -72,11 +119,18 @@ def get_processor():
 # Dev convenience: create tables once (use Alembic later in prod)
 db_models.Base.metadata.create_all(bind=engine)
 
+# Instrument the app and expose /metrics endpoint
+# Must be called after app creation but before defining routes
+instrumentator.instrument(app).expose(app)
+
+smart_logger.info("Prometheus instrumentation enabled. Metrics available at /metrics")
+
+# ===== ENDPOINTS =====
 
 @app.get("/health")
 async def health_check():
     api_log.info("Health check ping")
-    return {"status": "healthy"}
+    return {"status": "healthy", "service": "smartdoc-backend"}
 
 
 @app.get("/documents")
@@ -115,74 +169,108 @@ async def process_document(
     processor: DocumentProcessor = Depends(get_processor)
 ):
     """
-    Full pipeline:
+    Full pipeline with Prometheus metrics:
       1) Save upload to disk
       2) Create Document row
       3) Run OCR + LLM
       4) Persist Result row
       5) Return (document, latest_result)
     """
-    api_log.info("Received /process request")
-    # 1) Save upload
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    # use a subdir per document id? (DB will generate id—so save temp first)
-    temp_path = upload_dir / file.filename
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    size = os.path.getsize(temp_path)
-
-    # 2) Create Document row (DB will assign id)
-    doc = crud.create_document(
-        db,
-        filename=file.filename,
-        content_type=file.content_type or "application/octet-stream",
-        size=size,
-        stored_path=str(temp_path),  # for dev/local only
-    )
-
-    # Optionally move file into a folder named after doc.id
-    doc_dir = upload_dir / doc.id
-    doc_dir.mkdir(parents=True, exist_ok=True)
-    final_path = doc_dir / file.filename
-    temp_path.replace(final_path)
-
-    # Also update stored_path to the final location if you care (optional)
-    # (requires a tiny update method in crud; safe to skip for now)
-
-    # 3) Run pipeline
-    result = processor.process(final_path)
-
-    # Extract metrics safely
-    ocr_conf = float(result.get("ocr", {}).get("confidence", 0.0) or 0.0)
-    tokens = int(result.get("tokens_used", 0) or 0)
-    cost = float(result.get("processing_cost", 0.0) or 0.0)
-    extracted = result.get("extracted_data", {}) or {}
-
-    # 4) Persist Result row
-    res = crud.add_result(
-        db,
-        document_id=doc.id,
-        ocr_conf=ocr_conf,
-        tokens=tokens,
-        cost=cost,
-        extracted=extracted,
-    )
-
-    # (Optional) also write the full result JSON to disk as a backup
-    processed_dir = Path(settings.processed_dir)
-    processed_dir.mkdir(parents=True, exist_ok=True)
-    # Keep it simple: write {doc.id}.json
+    # Start timing
+    start_time = time.time()
+    active_processing.inc()  # Increment active processing counter
+    
     try:
-        import json
-        with open(processed_dir / f"{doc.id}.json", "w", encoding="utf-8") as f:
-            json.dump({"document_id": doc.id, **result}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.warning(f"Could not write processed JSON file: {e}")
+        api_log.info("Received /process request")
+        
+        # 1) Save upload
+        upload_dir = Path(settings.upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = upload_dir / file.filename
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        size = os.path.getsize(temp_path)
 
-    # 5) Response
-    clean = result.get("extracted_data") or result.get("extracted_json") or {}
-    return {"document": doc, "latest_result": res, "extracted_data": clean}
+        # 2) Create Document row (DB will assign id)
+        doc = crud.create_document(
+            db,
+            filename=file.filename,
+            content_type=file.content_type or "application/octet-stream",
+            size=size,
+            stored_path=str(temp_path),
+        )
+
+        # Move file into a folder named after doc.id
+        doc_dir = upload_dir / doc.id
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        final_path = doc_dir / file.filename
+        temp_path.replace(final_path)
+
+        # 3) Run pipeline with timing
+        llm_start = time.time()
+        result = processor.process(final_path)
+        llm_duration = time.time() - llm_start
+        
+        # Record LLM call duration
+        llm_call_duration.observe(llm_duration)
+
+        # Extract metrics safely
+        ocr_conf = float(result.get("ocr", {}).get("confidence", 0.0) or 0.0)
+        tokens = int(result.get("tokens_used", 0) or 0)
+        cost = float(result.get("processing_cost", 0.0) or 0.0)
+        extracted = result.get("extracted_data", {}) or {}
+
+        # Record OCR confidence if available
+        if ocr_conf > 0:
+            ocr_confidence.observe(ocr_conf)
+
+        # 4) Persist Result row
+        res = crud.add_result(
+            db,
+            document_id=doc.id,
+            ocr_conf=ocr_conf,
+            tokens=tokens,
+            cost=cost,
+            extracted=extracted,
+        )
+
+        # Save processed JSON to disk
+        processed_dir = Path(settings.processed_dir)
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            import json
+            with open(processed_dir / f"{doc.id}.json", "w", encoding="utf-8") as f:
+                json.dump({"document_id": doc.id, **result}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not write processed JSON file: {e}")
+
+        # Record successful processing
+        documents_processed.labels(status='success').inc()
+        
+        # Record total processing time
+        total_duration = time.time() - start_time
+        processing_duration.observe(total_duration)
+        
+        api_log.info(f"Document processed successfully in {total_duration:.2f}s (LLM: {llm_duration:.2f}s)")
+
+        # 5) Response
+        clean = result.get("extracted_data") or result.get("extracted_json") or {}
+        return {"document": doc, "latest_result": res, "extracted_data": clean}
+        
+    except Exception as e:
+        # Record failed processing
+        documents_processed.labels(status='failed').inc()
+        
+        # Record duration even for failures
+        total_duration = time.time() - start_time
+        processing_duration.observe(total_duration)
+        
+        logger.error(f"Processing failed after {total_duration:.2f}s: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    finally:
+        # Always decrement active processing counter
+        active_processing.dec()
 
 
 @app.get("/results/{doc_id}", response_model=schemas.ProcessResponse)
@@ -210,10 +298,10 @@ async def list_results(limit: int = 10, db=Depends(get_db)):
         })
     return enriched
 
+
 @app.delete("/documents/{doc_id}")
 async def delete_document(doc_id: str, db=Depends(get_db)):
     ok = crud.delete_document_and_results(db, doc_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"deleted": True, "document_id": doc_id}
-

@@ -1,13 +1,13 @@
-name: Deploy Backend and Frontend to Cloud Run
+name: Deploy Backend, Frontend, Prometheus, and Grafana to Cloud Run
 
 on:
   push:
     branches:
-      - main  # Trigger deployment on every push to main
+      - main
 
 jobs:
-  backend:
-    name: Deploy Backend
+  deploy:
+    name: Deploy All Services
     runs-on: ubuntu-latest
 
     steps:
@@ -30,13 +30,12 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker gcr.io -q
 
-      # 🧩 Build and Push Backend Image
+      # ================= BACKEND ===================
       - name: Build and Push Backend Image
         run: |
           docker build -t gcr.io/smart-doc-476211/backend:${{ github.sha }} -f Dockerfile.backend .
           docker push gcr.io/smart-doc-476211/backend:${{ github.sha }}
 
-      # 🧩 Deploy Backend to Cloud Run
       - name: Deploy Backend to Cloud Run
         run: |
           gcloud run deploy backend \
@@ -44,42 +43,23 @@ jobs:
             --region asia-east1 \
             --platform managed \
             --allow-unauthenticated \
+            --port 8000 \
             --service-account cloudrun-backend@smart-doc-476211.iam.gserviceaccount.com \
-            --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,KIMI_API_KEY=KIMI_API_KEY:latest,POSTGRES_URL=POSTGRES_URL:latest" \
-            --set-env-vars "USE_KIMI_API=true,UPLOAD_DIR=/tmp/uploads,PROCESSED_DIR=/tmp/processed"
+            --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest,KIMI_API_KEY=KIMI_API_KEY:latest,POSTGRES_URL=POSTGRES_URL:latest" \
+            --set-env-vars="USE_KIMI_API=true,UPLOAD_DIR=/tmp/uploads,PROCESSED_DIR=/tmp/processed,ENABLE_METRICS=true"
 
-  frontend:
-    name: Deploy Frontend
-    runs-on: ubuntu-latest
-    needs: backend  # Run after backend deployment completes
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # 🧩 Authenticate to Google Cloud
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      # 🧩 Set up gcloud CLI
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: smart-doc-476211
-
-      # 🧩 Configure Docker for GCP
-      - name: Configure Docker for GCP
-        run: gcloud auth configure-docker gcr.io -q
-
-      # 🧩 Build and Push Frontend Image
+      # ================= FRONTEND ===================
       - name: Build and Push Frontend Image
         run: |
           docker build -t gcr.io/smart-doc-476211/frontend:${{ github.sha }} -f Dockerfile.frontend .
           docker push gcr.io/smart-doc-476211/frontend:${{ github.sha }}
 
-      # 🧩 Deploy Frontend to Cloud Run
+      - name: Get Backend URL
+        id: backend_url
+        run: |
+          BACKEND_URL=$(gcloud run services describe backend --region asia-east1 --format='value(status.url)')
+          echo "url=$BACKEND_URL" >> $GITHUB_OUTPUT
+
       - name: Deploy Frontend to Cloud Run
         run: |
           gcloud run deploy frontend \
@@ -87,4 +67,51 @@ jobs:
             --region asia-east1 \
             --platform managed \
             --allow-unauthenticated \
-            --service-account cloudrun-backend@smart-doc-476211.iam.gserviceaccount.com
+            --port 8501 \
+            --service-account cloudrun-backend@smart-doc-476211.iam.gserviceaccount.com \
+            --set-env-vars="BACKEND_URL=${{ steps.backend_url.outputs.url }}"
+
+      # ================= PROMETHEUS ===================
+      - name: Build and Push Prometheus Image
+        run: |
+          docker build -t gcr.io/smart-doc-476211/prometheus:${{ github.sha }} -f Dockerfile.prometheus .
+          docker push gcr.io/smart-doc-476211/prometheus:${{ github.sha }}
+
+      - name: Deploy Prometheus to Cloud Run
+        run: |
+          gcloud run deploy prometheus \
+            --image gcr.io/smart-doc-476211/prometheus:${{ github.sha }} \
+            --region asia-east1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 9090
+
+      # ================= GRAFANA ===================
+      - name: Build and Push Grafana Image
+        run: |
+          docker build -t gcr.io/smart-doc-476211/grafana:${{ github.sha }} -f Dockerfile.grafana .
+          docker push gcr.io/smart-doc-476211/grafana:${{ github.sha }}
+
+      - name: Deploy Grafana to Cloud Run
+        run: |
+          gcloud run deploy grafana \
+            --image gcr.io/smart-doc-476211/grafana:${{ github.sha }} \
+            --region asia-east1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 3000 \
+            --service-account cloudrun-backend@smart-doc-476211.iam.gserviceaccount.com \
+            --set-secrets="GF_SECURITY_ADMIN_PASSWORD=GRAFANA_ADMIN_PASSWORD:latest" \
+            --set-env-vars="GF_USERS_ALLOW_SIGN_UP=false"
+
+      # ================= DEPLOYMENT SUMMARY ===================
+      - name: Display Service URLs
+        run: |
+          echo "🚀 Deployment Complete!"
+          echo "================================"
+          echo "Backend:    $(gcloud run services describe backend --region asia-east1 --format='value(status.url)')"
+          echo "Frontend:   $(gcloud run services describe frontend --region asia-east1 --format='value(status.url)')"
+          echo "Prometheus: $(gcloud run services describe prometheus --region asia-east1 --format='value(status.url)')"
+          echo "Grafana:    $(gcloud run services describe grafana --region asia-east1 --format='value(status.url)')"
+          echo "================================"
+          echo "📊 Grafana Login: admin / [stored in GCP Secret Manager]"
