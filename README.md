@@ -80,18 +80,6 @@ Automated multi-service build and deploy pipeline
 
 
 
-## ⚙️ Key Features
-
-- 🧠 **OCR + LLM pipeline** — DocTR → Kimi K2  
-- 💾 **Structured output persisted to PostgreSQL**  
-- 📊 **Observability** via Prometheus metrics and Grafana dashboards  
-- 🐳 **Containerized services** (backend, frontend, monitoring)  
-- 🔁 **CI/CD automation** with GitHub Actions deploying to Cloud Run  
-- ⚙️ **Configurable** via environment variables  
-  (`ENABLE_METRICS`, `USE_KIMI_API`, etc.)
-
----
-
 ## 🧾 Prometheus Metrics
 
 Custom metrics exposed by the backend:
