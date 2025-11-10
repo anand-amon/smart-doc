@@ -14,7 +14,7 @@
 It integrates:
 
 - 🧠 **Kimi K2 (Moonshot AI)** — cost-efficient LLM for structured field extraction  
-- 🔤 **DocTR OCR** — text recognition from scanned docs  
+- 🔤 **Tesseract OCR** — text recognition from scanned docs  
 - ⚙️ **FastAPI** backend instrumented with Prometheus metrics  
 - 🪶 **Streamlit** frontend for interactive visualization  
 - 💾 **PostgreSQL** database for persistent storage  
@@ -31,7 +31,7 @@ It integrates:
 │
 ▼
 [ FastAPI Backend ]
-├── OCR (DocTR)
+├── OCR (Tesseract)
 ├── LLM Parsing (Kimi K2)
 ├── Prometheus /metrics
 └── PostgreSQL Database
@@ -173,7 +173,7 @@ Grafana → http://localhost:3000
 |-----------|-------------|
 | 🖥️ Frontend | Streamlit |
 | ⚙️ Backend | FastAPI, Pydantic |
-| 🤖 AI | DocTR OCR, Kimi K2 (Moonshot AI) |
+| 🤖 AI | Tesseract OCR, Kimi K2 (Moonshot AI) |
 | 🗄️ Database | PostgreSQL |
 | 📊 Monitoring | Prometheus, Grafana |
 | 🚀 CI/CD | Docker, GitHub Actions, Cloud Run |
@@ -228,7 +228,7 @@ This project is intended for educational and demonstration purposes.
 Grateful thanks to the open-source and cloud tools that made **SmartDoc** possible:
 
 - 🧠 **Moonshot AI — Kimi K2** for cost-efficient large language model inference  
-- 🔤 **DocTR (Document Text Recognition)** for OCR-based text extraction  
+- 🔤 **Tesseract OCR (Document Text Recognition)** for OCR-based text extraction  
 - ☁️ **Google Cloud** for Cloud Run, Cloud SQL, and Secret Manager  
 - 📊 **Prometheus & Grafana** for monitoring and observability  
 - ⚙️ **Streamlit & FastAPI** for rapid app development
