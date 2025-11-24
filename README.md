@@ -125,6 +125,7 @@ git clone https://github.com/anand-amon/smart-doc.git
 
 # Navigate into the project folder
 cd smart-doc
+pip install -r requirements.txt
 ```
 
 ### 2️⃣ Create `.env`
