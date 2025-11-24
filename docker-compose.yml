@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   backend:
     build:
@@ -9,7 +11,9 @@ services:
     env_file:
       - .env
     volumes:
-      - ./backend:/app/backend  # Local backend/ → Container /app/backend
+      - ./backend:/app
+    depends_on:
+      - postgres
     restart: unless-stopped
 
   frontend:
@@ -24,7 +28,32 @@ services:
     env_file:
       - .env
     volumes:
-      - ./frontend:/app/frontend  # Local frontend/ → Container /app/frontend
+      - ./frontend:/app
     depends_on:
       - backend
     restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: smartdoc-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: smartdoc
+      POSTGRES_PASSWORD: smartdoc
+      POSTGRES_DB: smartdoc
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  adminer:
+    image: adminer
+    container_name: smartdoc-adminer
+    restart: always
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:

@@ -1,24 +1,20 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
- 
- 
-# SQLite database file
-DATABASE_URL = "sqlite:///./app.db"
 
-# Required for SQLite
-connect_args = {"check_same_thread": False}
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# SQLAlchemy engine
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+# Example:
+# postgresql+psycopg2://smartdoc:smartdoc@postgres:5432/smartdoc
 
-# Session factory
+# Postgres does NOT need connect_args
+engine = create_engine(DATABASE_URL)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Declarative base
 class Base(DeclarativeBase):
     pass
 
-# FastAPI dependency for DB
 def get_db():
     db = SessionLocal()
     try:

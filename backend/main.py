@@ -102,6 +102,8 @@ app.add_middleware(
 from backend.db.database import get_db, engine
 from backend.db import models as db_models
 from backend.db import crud, schemas
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 # Processing pipeline
 from backend.pipeline.document_processor import DocumentProcessor
@@ -305,3 +307,8 @@ async def delete_document(doc_id: str, db=Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"deleted": True, "document_id": doc_id}
+
+@app.get("/db-test")
+def db_test(db: Session = Depends(get_db)):
+    result = db.execute(text("SELECT 1")).scalar()
+    return {"database_ok": result == 1}
