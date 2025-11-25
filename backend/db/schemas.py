@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
 
 class ResultOut(BaseModel):
     id: str
@@ -29,3 +29,13 @@ class ProcessResponse(BaseModel):
     document: DocumentOut
     latest_result: ResultOut
     extracted_data: Optional[dict] = None
+
+class AskRequest(BaseModel):
+    query: str
+    top_k: int = 6
+    document_ids: Optional[List[str]] = None  # optional filter
+
+class AskResponse(BaseModel):
+    answer: str
+    mode: str  # "rag" or "structured"
+    sources: List[Dict[str, Any]]  # chunks + metadata

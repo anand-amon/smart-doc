@@ -12,6 +12,7 @@ data/processed/
 logs/
 *.db
 *.sqlite3
+vectorstore/
 
 # OS
 .DS_Store

@@ -33,17 +33,29 @@ class CVProcessor:
         return {"text": text, "confidence": avg_conf / 100}
 
     def process_document(self, file_path: Path):
-        """Main entry point"""
         if file_path.suffix.lower() == ".pdf":
             images = self.pdf_to_images(file_path)
-            image = images[0]  # first page only for now
         else:
-            image = Image.open(file_path)
+            images = [Image.open(file_path)]
 
-        result = self.extract_text(image)
+        all_text = []
+        confs = []
+        word_count = 0
+
+        for image in images:
+            ocr = self.extract_text(image)
+            all_text.append(ocr["text"])
+            confs.append(ocr["confidence"])
+            word_count += len(ocr["text"].split())
+
+        text = "\n".join(all_text)
+        avg_conf = sum(confs) / len(confs) if confs else 0
+
+        logger.info(f"OCR average confidence: {avg_conf:.2f}")
+        
         return {
             "file": file_path.name,
-            "text": result["text"],
-            "confidence": result["confidence"],
-            "word_count": len(result["text"].split())
+            "text": text,
+            "confidence": avg_conf,
+            "word_count": word_count
         }

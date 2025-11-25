@@ -5,6 +5,8 @@ import shutil, os, logging, time
 from logging.handlers import RotatingFileHandler
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram, Gauge
+from backend.utils.text_chunker import chunk_text
+import json
 
 # Always resolve to the project root: backend/main.py → parents[1] == project root
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -110,10 +112,23 @@ from sqlalchemy import text
 from backend.pipeline.document_processor import DocumentProcessor
 from fastapi import Query
 from typing import List
+from backend.db.schemas import AskRequest, AskResponse
+
+# -------------RAG/CHROMA setup ---------------------------------
+import chromadb
+
+VECTOR_DIR = BASE_DIR / "vectorstore"
+VECTOR_DIR.mkdir(exist_ok=True)
+
+chroma_client = chromadb.PersistentClient(path=str(VECTOR_DIR))
+chroma_collection = chroma_client.get_or_create_collection(
+    name="smartdoc_chunks",
+    metadata={"hnsw:space": "cosine"}
+)
 
 # ----------------------------------------------------------------
 
-logger = logging.getLogger("smart_logger")
+logger = logging.getLogger("smartdoc")
 
 def get_processor():
     """Create processor only when needed (lazy initialization for GCP)"""
@@ -212,8 +227,44 @@ async def process_document(
         # 3) Run pipeline with timing
         llm_start = time.time()
         result = processor.process(final_path)
+
+        # ===================== RAG INDEXING =====================
+        try:
+            # Get OCR text (your DocumentProcessor returns raw_text implicitly as result["ocr"]["text"])
+            ocr_text = result.get("raw_text") or result.get("ocr", {}).get("text", "")
+
+            if ocr_text:
+                # Split into overlapping chunks
+                chunks = chunk_text(ocr_text)
+
+                # Embed using your LLMProcessor
+                logger.info(f"Embedding {len(chunks)} chunks...")
+                embeddings = processor.llm.embed_texts(chunks)
+                logger.info("Embedding complete.")
+
+                # Store in DB + Chroma
+                for ch, emb in zip(chunks, embeddings):
+                    chunk_row = crud.add_chunk(db, doc.id, ch, emb)
+
+                    chroma_collection.add(
+                        ids=[chunk_row.id],
+                        documents=[ch],
+                        embeddings=[emb],
+                        metadatas=[{
+                            "document_id": doc.id,
+                            "filename": doc.filename
+                        }]
+                    )
+
+                api_log.info(f"Indexed {len(chunks)} chunks for doc {doc.id}")
+
+        except Exception as e:
+            import traceback
+            api_log.error(f"RAG indexing failed for {doc.id}: {repr(e)}")
+            api_log.error(traceback.format_exc())
+
         llm_duration = time.time() - llm_start
-        
+
         # Record LLM call duration
         llm_call_duration.observe(llm_duration)
 
@@ -276,6 +327,135 @@ async def process_document(
         active_processing.dec()
 
 
+
+@app.post("/ask", response_model=AskResponse)
+async def ask(
+    req: AskRequest,
+    db=Depends(get_db),
+    processor: DocumentProcessor = Depends(get_processor)
+):
+    query = req.query.strip()
+    top_k = req.top_k
+
+    # ---------------------------------------------------------
+    # ROUTER LOGIC — decide structured vs RAG
+    # ---------------------------------------------------------
+    structured_keywords = [
+        "total", "sum", "average", "avg", "count",
+        "earliest", "latest", "min", 'minimum', "max", "maximum",
+        "highest", "lowest", "oldest", "newest"
+    ]
+
+    needs_structured = any(k in query.lower() for k in structured_keywords)
+
+    # =========================================================
+    # 1. STRUCTURED QA (clean extracted JSON)
+    # =========================================================
+    if needs_structured:
+        rows = crud.list_recent(db, limit=5000)
+        extracted = [r.extracted_json for r in rows if r.extracted_json]
+
+        prompt = f"""
+        You are SmartDoc's structured analytics assistant.
+
+        User question:
+        "{query}"
+
+        Below is a JSON list of extracted fields from documents:
+        {json.dumps(extracted, ensure_ascii=False, indent=2)}
+
+        Instructions:
+        - Use ONLY this structured JSON data.
+        - Perform exact math (sums, counts, min/max, earliest/latest).
+        - If impossible to answer, say so.
+        """
+
+        answer = processor.llm.client.chat.completions.create(
+            model=processor.llm.model,
+            messages=[
+                {"role": "system", "content": "Accurate structured reasoning only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        ).choices[0].message.content.strip()
+
+        return {
+            "answer": answer,
+            "mode": "structured",
+            "sources": extracted
+        }
+
+    # =========================================================
+    # 2. RAG QA (semantic search over OCR chunks)
+    # =========================================================
+
+    # 2.1 Embed query
+    q_emb = processor.llm.embed_texts([query])[0]
+
+    # 2.2 Retrieve from ChromaDB
+    where_filter = None
+    if req.document_ids:
+        where_filter = {"document_id": {"$in": req.document_ids}}
+
+    hits = chroma_collection.query(
+        query_embeddings=[q_emb],
+        n_results=top_k,
+        where=where_filter
+    )
+
+    docs = hits.get("documents", [[]])[0]
+    metas = hits.get("metadatas", [[]])[0]
+    ids = hits.get("ids", [[]])[0]
+
+    if not docs:
+        return {
+            "answer": "No relevant information found.",
+            "mode": "rag",
+            "sources": []
+        }
+
+    # 2.3 Build context text
+    context_text = "\n\n".join(docs)
+
+    prompt = f"""
+    You are SmartDoc's RAG assistant.
+
+    User question:
+    {query}
+
+    Context from retrieved document chunks:
+    {context_text}
+
+    Instructions:
+    - Answer ONLY using this retrieved context.
+    - If context is insufficient, say so.
+    """
+
+    answer = processor.llm.client.chat.completions.create(
+        model=processor.llm.model,
+        messages=[
+            {"role": "system", "content": "Answer only from retrieved context."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0
+    ).choices[0].message.content.strip()
+
+    sources = []
+    for cid, text, meta in zip(ids, docs, metas):
+        sources.append({
+            "chunk_id": cid,
+            "document_id": meta.get("document_id"),
+            "filename": meta.get("filename"),
+            "preview": text[:200]
+        })
+
+    return {
+        "answer": answer,
+        "mode": "rag",
+        "sources": sources
+    }
+
+
 @app.get("/results/{doc_id}", response_model=schemas.ProcessResponse)
 async def get_result(doc_id: str, db=Depends(get_db)):
     doc = crud.get_document(db, doc_id)
@@ -304,9 +484,28 @@ async def list_results(limit: int = 10, db=Depends(get_db)):
 
 @app.delete("/documents/{doc_id}")
 async def delete_document(doc_id: str, db=Depends(get_db)):
+    # 1) Load doc (check existence)
+    doc = crud.get_document(db, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # 2) Fetch chunk rows BEFORE deleting DB rows (we need their IDs)
+    chunk_rows = crud.get_document_chunks(db, doc_id)
+    chunk_ids = [c.id for c in chunk_rows]
+
+    # 3) Delete from Chroma
+    try:
+        if chunk_ids:
+            chroma_collection.delete(ids=chunk_ids)
+            logger.info(f"Deleted {len(chunk_ids)} chunks from Chroma for doc {doc_id}")
+    except Exception as e:
+        logger.warning(f"Failed to delete Chroma vectors for doc {doc_id}: {e}")
+
+    # 4) Delete SQL rows + files
     ok = crud.delete_document_and_results(db, doc_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(status_code=404, detail="Document not found during delete")
+
     return {"deleted": True, "document_id": doc_id}
 
 @app.get("/db-test")

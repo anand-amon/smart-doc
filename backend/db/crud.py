@@ -7,6 +7,8 @@ from . import models
 from config import settings
 import shutil, os
 
+from backend.db.models import DocumentChunk
+
 def create_document(db: Session, *, filename: str, content_type: str, size: int, stored_path: str) -> models.Document:
     doc = models.Document(
         filename=filename,
@@ -60,16 +62,21 @@ def delete_document_and_results(db: Session, doc_id: str) -> bool:
     if not doc:
         return False
 
-    # delete result rows
+    # 1) Delete results
     db.query(models.Result).filter(models.Result.document_id == doc_id).delete()
 
-    # delete processed backup JSON
+    # 2) Delete document_chunks (RAG vectors)
+    db.query(models.DocumentChunk).filter(
+        models.DocumentChunk.document_id == doc_id
+    ).delete()
+
+    # 3) Clean processed JSON
     try:
         (Path(settings.processed_dir) / f"{doc_id}.json").unlink(missing_ok=True)
-    except Exception:
+    except:
         pass
 
-    # delete uploaded file/folder if you used per-doc subdir
+    # 4) Delete file/folder
     try:
         p = Path(doc.stored_path)
         folder = p.parent if p.exists() else (Path(settings.upload_dir) / doc_id)
@@ -77,9 +84,29 @@ def delete_document_and_results(db: Session, doc_id: str) -> bool:
             shutil.rmtree(folder)
         else:
             p.unlink(missing_ok=True)
-    except Exception:
+    except:
         pass
 
+    # 5) Finally delete the document row
     db.delete(doc)
     db.commit()
     return True
+
+def add_chunk(db, document_id: str, chunk_text: str, embedding: list[float]):
+    row = DocumentChunk(
+        document_id=document_id,
+        chunk_text=chunk_text,
+        embedding=embedding,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_document_chunks(db, document_id: str):
+    return db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).all()
+
+
+def list_all_chunks(db, limit: int = 5000):
+    return db.query(DocumentChunk).order_by(DocumentChunk.created_at.desc()).limit(limit).all()
