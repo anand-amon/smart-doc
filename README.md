@@ -127,6 +127,15 @@ git clone https://github.com/anand-amon/smart-doc.git
 cd smart-doc
 pip install -r requirements.txt
 ```
+🟦 Tesseract-OCR Windows Installation
+
+Download the official Windows build (UB Mannheim):
+
+🔗 https://github.com/UB-Mannheim/tesseract/wiki
+
+Install using the .exe installer.
+
+After installation, make sure Tesseract is on your PATH
 
 ### 2️⃣ Create `.env`
 
