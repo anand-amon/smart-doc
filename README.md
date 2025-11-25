@@ -9,11 +9,11 @@
 
 ## 🚀 Overview
 
-**SmartDoc** is an AI-powered document intelligence system that extracts and structures key fields from invoices, receipts, and business documents.
+**SmartDoc** is an AI-powered document intelligence system that extracts and structures key fields from invoices, receipts, and business documents and allows users to chat with the documents.
 
 It integrates:
 
-- 🧠 **Kimi K2 (Moonshot AI)** — cost-efficient LLM for structured field extraction  
+- 🧠 **Kimi K2 (Moonshot AI)** — cost-efficient LLM for structured field extraction and RAG 
 - 🔤 **Tesseract OCR** — text recognition from scanned docs  
 - ⚙️ **FastAPI** backend instrumented with Prometheus metrics  
 - 🪶 **Streamlit** frontend for interactive visualization  
