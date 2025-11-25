@@ -5,6 +5,7 @@ import shutil, os, logging, time
 from logging.handlers import RotatingFileHandler
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram, Gauge
+from backend.utils.text_chunker import chunk_text
 
 # Always resolve to the project root: backend/main.py → parents[1] == project root
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -111,9 +112,21 @@ from backend.pipeline.document_processor import DocumentProcessor
 from fastapi import Query
 from typing import List
 
+# -------------RAG/CHROMA setup ---------------------------------
+import chromadb
+
+VECTOR_DIR = BASE_DIR / "vectorstore"
+VECTOR_DIR.mkdir(exist_ok=True)
+
+chroma_client = chromadb.PersistentClient(path=str(VECTOR_DIR))
+chroma_collection = chroma_client.get_or_create_collection(
+    name="smartdoc_chunks",
+    metadata={"hnsw:space": "cosine"}
+)
+
 # ----------------------------------------------------------------
 
-logger = logging.getLogger("smart_logger")
+logger = logging.getLogger("smartdoc")
 
 def get_processor():
     """Create processor only when needed (lazy initialization for GCP)"""
@@ -212,8 +225,40 @@ async def process_document(
         # 3) Run pipeline with timing
         llm_start = time.time()
         result = processor.process(final_path)
+
+        # ===================== RAG INDEXING =====================
+        try:
+            # Get OCR text (your DocumentProcessor returns raw_text implicitly as result["ocr"]["text"])
+            ocr_text = result.get("raw_text") or result.get("ocr", {}).get("text", "")
+
+            if ocr_text:
+                # Split into overlapping chunks
+                chunks = chunk_text(ocr_text)
+
+                # Embed using your LLMProcessor
+                embeddings = processor.llm.embed_texts(chunks)
+
+                # Store in DB + Chroma
+                for ch, emb in zip(chunks, embeddings):
+                    chunk_row = crud.add_chunk(db, doc.id, ch, emb)
+
+                    chroma_collection.add(
+                        ids=[chunk_row.id],
+                        documents=[ch],
+                        embeddings=[emb],
+                        metadatas=[{
+                            "document_id": doc.id,
+                            "filename": doc.filename
+                        }]
+                    )
+
+                api_log.info(f"Indexed {len(chunks)} chunks for doc {doc.id}")
+
+        except Exception as e:
+            api_log.warning(f"RAG indexing failed for {doc.id}: {e}")
+
         llm_duration = time.time() - llm_start
-        
+
         # Record LLM call duration
         llm_call_duration.observe(llm_duration)
 

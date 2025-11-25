@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Float, Integer, ForeignKey, JSON
+from sqlalchemy import Column, String, DateTime, Float, Integer, ForeignKey, JSON, Text
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 import uuid
@@ -33,3 +33,14 @@ class Result(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     document: Mapped[Document] = relationship("Document", back_populates="results")
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id = Column(String, ForeignKey("documents.id"), index=True, nullable=False)
+
+    chunk_text = Column(Text, nullable=False)
+    embedding = Column(JSON, nullable=False)  # list[float]
+
+    created_at = Column(DateTime, default=datetime.utcnow)

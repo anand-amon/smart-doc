@@ -1,5 +1,7 @@
 import os, json, logging
 from openai import OpenAI
+from typing import List
+from config import settings 
 
 logger = logging.getLogger(__name__)
 
@@ -80,4 +82,18 @@ class LLMProcessor:
             logger.error(f"LLM extraction failed: {e}", exc_info=True)
             return {"error": str(e)}
         
-        #
+    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        """
+        Embeds a batch of texts using the same provider (Kimi or OpenAI)
+        that this processor was initialized with.
+        """
+        if not texts:
+            return []
+
+        embed_model = settings.kimi_embed_model if self.use_kimi else settings.openai_embed_model
+
+        resp = self.client.embeddings.create(
+            model=embed_model,
+            input=texts
+        )
+        return [d.embedding for d in resp.data]

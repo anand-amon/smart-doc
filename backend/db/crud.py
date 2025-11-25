@@ -7,6 +7,8 @@ from . import models
 from config import settings
 import shutil, os
 
+from backend.db.models import DocumentChunk
+
 def create_document(db: Session, *, filename: str, content_type: str, size: int, stored_path: str) -> models.Document:
     doc = models.Document(
         filename=filename,
@@ -83,3 +85,22 @@ def delete_document_and_results(db: Session, doc_id: str) -> bool:
     db.delete(doc)
     db.commit()
     return True
+
+def add_chunk(db, document_id: str, chunk_text: str, embedding: list[float]):
+    row = DocumentChunk(
+        document_id=document_id,
+        chunk_text=chunk_text,
+        embedding=embedding,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_document_chunks(db, document_id: str):
+    return db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).all()
+
+
+def list_all_chunks(db, limit: int = 5000):
+    return db.query(DocumentChunk).order_by(DocumentChunk.created_at.desc()).limit(limit).all()
