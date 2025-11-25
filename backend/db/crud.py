@@ -62,16 +62,21 @@ def delete_document_and_results(db: Session, doc_id: str) -> bool:
     if not doc:
         return False
 
-    # delete result rows
+    # 1) Delete results
     db.query(models.Result).filter(models.Result.document_id == doc_id).delete()
 
-    # delete processed backup JSON
+    # 2) Delete document_chunks (RAG vectors)
+    db.query(models.DocumentChunk).filter(
+        models.DocumentChunk.document_id == doc_id
+    ).delete()
+
+    # 3) Clean processed JSON
     try:
         (Path(settings.processed_dir) / f"{doc_id}.json").unlink(missing_ok=True)
-    except Exception:
+    except:
         pass
 
-    # delete uploaded file/folder if you used per-doc subdir
+    # 4) Delete file/folder
     try:
         p = Path(doc.stored_path)
         folder = p.parent if p.exists() else (Path(settings.upload_dir) / doc_id)
@@ -79,9 +84,10 @@ def delete_document_and_results(db: Session, doc_id: str) -> bool:
             shutil.rmtree(folder)
         else:
             p.unlink(missing_ok=True)
-    except Exception:
+    except:
         pass
 
+    # 5) Finally delete the document row
     db.delete(doc)
     db.commit()
     return True

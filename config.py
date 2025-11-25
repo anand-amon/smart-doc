@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     processed_dir: str = "data/processed"
 
     # ✅ embeddings config
+    kimi_embed_url: str = "https://api.moonshot.cn/v1/embeddings"
     kimi_embed_model: str = "text-embedding-v1"
     openai_embed_model: str = "text-embedding-3-large"
 
