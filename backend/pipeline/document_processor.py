@@ -22,6 +22,8 @@ class DocumentProcessor:
                 f"Words={ocr_result.get('word_count', 0)}"
             )
 
+            logger.warning(f"OCR TEXT DEBUG >>> {ocr_result.get('text', '')[:300]}")
+
             # ---- LLM stage ----
             llm_result = self.llm.extract_fields(ocr_result["text"])
             logger.info(f"LLM extraction complete for {file_path.name}")
@@ -35,10 +37,10 @@ class DocumentProcessor:
                 },
                 "extracted_data": llm_result
             }
-
+            
             logger.info(f"✅ Finished processing {file_path.name}")
             return result
 
         except Exception as e:
             logger.error(f"❌ Processing failed for {file_path}: {e}", exc_info=True)
-            return {"error": str(e)}
+            raise e 

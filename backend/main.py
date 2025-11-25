@@ -25,9 +25,10 @@ file_handler.setFormatter(formatter)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 
-# Configure *your* app logger explicitly; don't rely on basicConfig
+# app logger explicit
 smart_logger = logging.getLogger("smartdoc")
 smart_logger.setLevel(logging.INFO)
+
 # Avoid duplicate handlers if uvicorn reloads
 smart_logger.handlers.clear()
 smart_logger.addHandler(file_handler)
@@ -112,7 +113,7 @@ from typing import List
 
 # ----------------------------------------------------------------
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("smart_logger")
 
 def get_processor():
     """Create processor only when needed (lazy initialization for GCP)"""

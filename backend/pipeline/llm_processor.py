@@ -57,6 +57,8 @@ class LLMProcessor:
                 temperature=0
             )
             content = response.choices[0].message.content
+            
+            logger.warning(f"RAW LLM OUTPUT >>> {content}")
 
             # 🧹 Clean fenced JSON if present
             if "```" in content:
